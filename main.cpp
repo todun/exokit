@@ -14,10 +14,22 @@
 #include <ml_lifecycle.h>
 #include <ml_privileges.h>
 
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <dlfcn.h>
+#include <jni.h>
+
+#include <iostream>
+
 #define LOG_TAG "exokit"
 #define application_name LOG_TAG
 
 using namespace v8;
+
+jint JNI_OnLoad(JavaVM* aVm, void* aReserved) {
+  std::cout << "main JNI_OnLoad " << (void *)aVm << " " << aReserved << std::endl;
+  return JNI_VERSION_1_6;
+}
 
 namespace node {
   extern std::map<std::string, void *> dlibs;
@@ -79,6 +91,174 @@ inline void registerDlibs(std::map<std::string, void *> &dlibs) {
   dlibs["/package/node_modules/child-process-thread/build/Release/child_process_thread.node"] = (void *)&node_register_module_child_process_thread;
 } */
 
+__attribute__ ((visibility ("default"))) void checkBoot() {
+  std::cout << "check boot" << std::endl;
+}
+
+int mkdirp(const char *path)
+{
+  /* Adapted from http://stackoverflow.com/a/2336245/119527 */
+  const size_t len = strlen(path);
+  char _path[PATH_MAX];
+  char *p; 
+
+  errno = 0;
+
+  /* Copy string so its mutable */
+  if (len > sizeof(_path)-1) {
+      errno = ENAMETOOLONG;
+      return -1; 
+  }   
+  strcpy(_path, path);
+
+  /* Iterate the string */
+  for (p = _path + 1; *p; p++) {
+    if (*p == '/') {
+      /* Temporarily truncate */
+      *p = '\0';
+
+      if (mkdir(_path, S_IRWXU) != 0) {
+        if (errno != EEXIST)
+          return -1; 
+      }
+
+      *p = '/';
+    }
+  }   
+
+  if (mkdir(_path, S_IRWXU) != 0) {
+    if (errno != EEXIST)
+      return -1; 
+  }   
+
+  return 0;
+}
+
+int fscopy(const char *src, const char *dst) {
+  /* SOURCE */
+  int sfd = open(src, O_RDONLY);
+  std::cout << "fscopy inner 0 " << src << " " << sfd << " " << errno << std::endl;
+  size_t filesize = lseek(sfd, 0, SEEK_END);
+
+  std::cout << "fscopy inner 1 " << src << " " << sfd << " " << filesize << " " << errno << std::endl;
+  
+  void *srcMem = mmap(NULL, filesize, PROT_READ, MAP_PRIVATE, sfd, 0);
+  
+  std::cout << "fscopy inner 2 " << srcMem << " " << errno << std::endl;
+
+  /* DESTINATION */
+  int dfd = open(dst, O_RDWR | O_CREAT, 0666);
+  
+  std::cout << "fscopy inner 3 " << dst << " " << dfd << " " << errno << std::endl;
+
+  ftruncate(dfd, filesize);
+
+  void *dstMem = mmap(NULL, filesize, PROT_READ | PROT_WRITE, MAP_SHARED, dfd, 0);
+  
+  std::cout << "fscopy inner 4 " << dstMem << " " << errno << std::endl;
+
+  /* COPY */
+
+  memcpy(dstMem, srcMem, filesize);
+
+  munmap(srcMem, filesize);
+  munmap(dstMem, filesize);
+
+  close(sfd);
+  close(dfd);
+
+  return 0;
+}
+
+__attribute__ ((visibility ("default"))) void doBoot() {
+  {
+    setenv("ANDROID_ROOT", "/package/system", 1);
+    setenv("ANDROID_DATA", "/tmp", 1);
+    setenv("BOOTCLASSPATH", "/package:.", 1);
+    setenv("CLASSPATH", "/package:.", 1);
+  }
+  {
+    int result = mkdirp("/tmp/dalvik-cache/arm64");
+    std::cout << "mkdirp result " << result << std::endl;
+  }
+  {
+    int result = fscopy("/package/system/framework/arm64/boot.art", "/tmp/dalvik-cache/arm64/package@system@framework@boot.art");
+    std::cout << "fscopy 1 result " << result << std::endl;
+  }
+  {
+    int result = fscopy("/package/system/framework/arm64/boot.oat", "/tmp/dalvik-cache/arm64/package@system@framework@boot.oat");
+    std::cout << "fscopy 2 result " << result << std::endl;
+  }
+  
+  std::cout << "init lib 0" << std::endl;
+  void *libandroid_runtime_dso = dlopen("libart.so", RTLD_NOW);
+  std::cout << "init lib 1 " << libandroid_runtime_dso << std::endl;
+  // jint (*JNI_GetDefaultJavaVMInitArgs)(void*) = (jint (*)(void*))dlsym(libandroid_runtime_dso, "JNI_GetDefaultJavaVMInitArgs");
+  jint (*JNI_CreateJavaVM)(JavaVM**, JNIEnv**, void*) = (jint (*)(JavaVM**, JNIEnv**, void*))dlsym(libandroid_runtime_dso, "JNI_CreateJavaVM");
+  jint (*JNI_GetCreatedJavaVMs)(JavaVM**, jsize, jsize*) = (jint (*)(JavaVM**, jsize, jsize*))dlsym(libandroid_runtime_dso, "JNI_GetCreatedJavaVMs");
+  std::cout << "init lib 2 " << (void *)JNI_CreateJavaVM << " " << JNI_GetCreatedJavaVMs << std::endl;
+  std::cout << "init lib X " << "\n" <<
+    "JNI_CreateJavaVM b *" << dlsym(libandroid_runtime_dso, "JNI_CreateJavaVM") << "\n" <<
+    
+    "_ZN3art2OS10FileExistsEPKc b *" << dlsym(libandroid_runtime_dso, "_ZN3art2OS10FileExistsEPKc") << "\n" <<
+    
+    "_ZN3art14GetAndroidRootEv b *" << dlsym(libandroid_runtime_dso, "_ZN3art14GetAndroidRootEv") << "\n" <<
+    
+    "_ZN7android22InitializeNativeLoaderEv b *" << dlsym(libandroid_runtime_dso, "_ZN7android22InitializeNativeLoaderEv") << "\n" <<
+    "_ZN3art7Runtime6CreateEONS_18RuntimeArgumentMapE b *" << dlsym(libandroid_runtime_dso, "_ZN3art7Runtime6CreateEONS_18RuntimeArgumentMapE") << "\n" <<
+    "_ZN3art7Runtime6CreateERKNSt3__16vectorINS1_4pairINS1_12basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEPKvEENS7_ISC_EEEEb b *" << dlsym(libandroid_runtime_dso, "_ZN3art7Runtime6CreateERKNSt3__16vectorINS1_4pairINS1_12basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEPKvEENS7_ISC_EEEEb") << "\n" <<
+    "_ZN3art7Runtime5StartEv b *" << dlsym(libandroid_runtime_dso, "_ZN3art7Runtime5StartEv") << "\n" <<
+    "_ZN3art7Runtime5AbortEv b *" << dlsym(libandroid_runtime_dso, "_ZN3art7Runtime5AbortEv") << "\n" <<
+
+    "_ZN3art2gc5space10ImageSpace4InitEPKcS4_bPKNS_7OatFileEPNSt3__112basic_stringIcNS8_11char_traitsIcEENS8_9allocatorIcEEEE b *" << dlsym(libandroid_runtime_dso, "_ZN3art2gc5space10ImageSpace4InitEPKcS4_bPKNS_7OatFileEPNSt3__112basic_stringIcNS8_11char_traitsIcEENS8_9allocatorIcEEEE") << "\n" <<
+    "_ZN3art2gc5space10ImageSpace15CreateBootImageEPKcNS_14InstructionSetEbPNSt3__112basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEE b *" << dlsym(libandroid_runtime_dso, "_ZN3art2gc5space10ImageSpace15CreateBootImageEPKcNS_14InstructionSetEbPNSt3__112basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEE") << "\n" <<
+    "_ZN3art2gc5space10ImageSpace17FindImageFilenameEPKcNS_14InstructionSetEPNSt3__112basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEEPbSD_SE_SE_SE_ b *" << dlsym(libandroid_runtime_dso, "_ZN3art2gc5space10ImageSpace17FindImageFilenameEPKcNS_14InstructionSetEPNSt3__112basic_stringIcNS6_11char_traitsIcEENS6_9allocatorIcEEEEPbSD_SE_SE_SE_") << "\n" <<
+    
+    "_ZN3art12StringPrintfEPKcz b *" << dlsym(libandroid_runtime_dso, "_ZN3art12StringPrintfEPKcz") << "\n" <<
+    
+    "_ZN3art14GetDalvikCacheEPKcb b *" << dlsym(libandroid_runtime_dso, "_ZN3art14GetDalvikCacheEPKcb") << "\n" <<
+    "_ZN3art14GetDalvikCacheEPKcbPNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEEPbSA_SA_ b *" << dlsym(libandroid_runtime_dso, "_ZN3art14GetDalvikCacheEPKcbPNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEEPbSA_SA_") << "\n" <<
+    "_ZN3art19GetDalvikCacheOrDieEPKcb b *" << dlsym(libandroid_runtime_dso, "_ZN3art19GetDalvikCacheOrDieEPKcb") << "\n" <<
+    "_ZN3art22GetDalvikCacheFilenameEPKcS1_PNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEES9_ b *" << dlsym(libandroid_runtime_dso, "_ZN3art22GetDalvikCacheFilenameEPKcS1_PNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEES9_") << "\n" <<
+    
+    "_ZN3art10LogMessage15LogLineLowStackEPKcjNS_11LogSeverityES2_ b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessage15LogLineLowStackEPKcjNS_11LogSeverityES2_") << "\n" <<
+    "_ZN3art10LogMessage6streamEv b *" << " " << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessage6streamEv") << "\n" <<
+    "_ZN3art10LogMessage7LogLineEPKcjNS_11LogSeverityES2_ b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessage7LogLineEPKcjNS_11LogSeverityES2_") << "\n" <<
+    "_ZN3art10LogMessageC1EPKcjNS_11LogSeverityEi b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessageC1EPKcjNS_11LogSeverityEi") << "\n" <<
+    "_ZN3art10LogMessageC2EPKcjNS_11LogSeverityEi b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessageC2EPKcjNS_11LogSeverityEi") << "\n" <<
+    "_ZN3art10LogMessageD1Ev b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessageD1Ev") << "\n" <<
+    "_ZN3art10LogMessageD2Ev b *" << dlsym(libandroid_runtime_dso, "_ZN3art10LogMessageD2Ev") << "\n" <<
+    
+  std::endl;
+
+  checkBoot();
+  
+  /* JavaVM *jvms[2];
+  jsize inSize = 2;
+  jsize outSize;
+  std::cout << "init lib 3" << std::endl;
+  jint result = JNI_GetCreatedJavaVMs(jvms, inSize, &outSize);
+  std::cout << "init lib 4 " << result << " " << outSize << std::endl; */
+  
+  /* JavaVMInitArgs args;
+  args.version = JNI_VERSION_1_6;
+  args.options = nullptr;
+  args.nOptions = 0;
+  args.ignoreUnrecognized = JNI_TRUE; */
+  JavaVMInitArgs args;                        // Initialization arguments
+  JavaVMOption *options = new JavaVMOption[1];   // JVM invocation options
+  options[0].optionString = "-Djava.class.path=/package:.";   // where to find java .class
+  args.version = JNI_VERSION_1_6;             // minimum Java version
+  args.nOptions = 1;                          // number of options
+  args.options = options;
+  args.ignoreUnrecognized = false;     // invalid options make the JVM init fail
+  JavaVM *jvm;
+  JNIEnv *env;
+  std::cout << "init lib 5 " << (void *)JNI_CreateJavaVM << std::endl;
+  jint result = JNI_CreateJavaVM(&jvm, &env, &args);
+  std::cout << "init lib 6 " << result << " " << (void *)jvm << " " << (void *)env << " " << args.nOptions << std::endl;
+}
+
 constexpr size_t STDIO_BUF_SIZE = 64 * 1024;
 const MLPrivilegeID privileges[] = {
   MLPrivilegeID_LowLatencyLightwear,
@@ -98,16 +278,24 @@ const MLPrivilegeID privileges[] = {
 };
 
 int main(int argc, char **argv) {
+  ML_LOG_TAG(Info, LOG_TAG, "main 1");
   if (argc > 1) {
     return node::Start(argc, argv);
   }
+  
+  ML_LOG_TAG(Info, LOG_TAG, "main 2");
 
   registerDlibs(node::dlibs);
 
+  ML_LOG_TAG(Info, LOG_TAG, "main 3");
+  
   MLResult result = MLPrivilegesStartup();
   if (result != MLResult_Ok) {
     ML_LOG(Info, "failed to start privilege system %x", result);
   }
+  
+  ML_LOG_TAG(Info, LOG_TAG, "main 4");
+  
   const size_t numPrivileges = sizeof(privileges) / sizeof(privileges[0]);
   for (size_t i = 0; i < numPrivileges; i++) {
     const MLPrivilegeID &privilege = privileges[i];
@@ -123,6 +311,8 @@ int main(int argc, char **argv) {
       }
     }
   }
+  
+  ML_LOG_TAG(Info, LOG_TAG, "main 5");
 
   /* {
     MLLifecycleCallbacks lifecycle_callbacks = {};
@@ -202,6 +392,23 @@ int main(int argc, char **argv) {
       close(stdoutfds[1]);
       close(stderrfds[1]);
     });
+
+    doBoot();
+    
+    /* {
+      std::cout << "init lib 3" << std::endl;
+      void *libandroid_runtime_dso = dlopen("libandroid_runtime.so", RTLD_NOW);
+      std::cout << "init lib 4 " << libandroid_runtime_dso << std::endl;
+      void *sym = dlsym(libandroid_runtime_dso, "JNI_CreateJavaVM");
+      std::cout << "init lib 5 " << sym << std::endl;
+    }
+    {
+      std::cout << "init lib 6" << std::endl;
+      void *libandroid_runtime_dso = dlopen("libnativehelper.so", RTLD_NOW);
+      std::cout << "init lib 7 " << libandroid_runtime_dso << std::endl;
+      void *sym = dlsym(libandroid_runtime_dso, "JNI_CreateJavaVM");
+      std::cout << "init lib 8 " << sym << std::endl;
+    } */
 
     const char *argsEnv = getenv("ARGS");
     if (argsEnv) {
