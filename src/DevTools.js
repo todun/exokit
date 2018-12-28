@@ -1,4 +1,6 @@
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const os = require('os');
 const htermRepl = require('hterm-repl');
 
@@ -18,8 +20,8 @@ const dataPath = (() => {
     if (candidatePathPrefix) {
       const ok = (() => {
         try {
-         fs.accessSync(candidatePathPrefix, fs.constants.W_OK);
-         return true;
+          fs.accessSync(candidatePathPrefix, fs.constants.W_OK);
+          return true;
         } catch(err) {
           return false;
         }
@@ -31,17 +33,32 @@ const dataPath = (() => {
   }
   return null;
 })();
+function cleanPipeName(str) {
+    if (process.platform === 'win32') {
+        str = str.replace(/^\//, '');
+        str = str.replace(/\//g, '-');
+        return '\\\\.\\pipe\\'+str;
+    } else {
+        return str;
+    }
+}
+const socketPath = cleanPipeName(path.join(dataPath, 'unix.socket'));
+
+console.log('got path', socketPath);
 
 const _getReplServer = (() => {
   let replServer = null;
   return () => new Promise((accept, reject) => {
     if (!replServer) {
       const newReplServer = http.createServer((req, res) => {
+        console.log('got req', req.url);
         req.pipe(process.stdout);
         req.on('end', () => {
+          console.log('req end');
           res.end('zol');
         });
-      }, err => {
+      });
+      newReplServer.listen(socketPath, err => {
         if (!err) {
           replServer = newReplServer;
           // XXX compute the url to use
@@ -50,7 +67,6 @@ const _getReplServer = (() => {
           reject(err);
         }
       });
-      newReplServer.listen('unix:' + path.join(dataPath, 'unix.socket'));
       /* htermRepl({
         port: DEVTOOLS_PORT,
       }, (err, newReplServer) => {
@@ -99,16 +115,14 @@ class DevTools {
     return '192.168.0.14';
   }
   getUrl() {
-    const result = 'unix:' + path.join(dataPath, 'unix.socket');
-    http.request(result, (err, res) => {
-      if (!err) {
-        console.log('got response', res.statusCode);
-        res.pipe(process.stdout);
-      } else {
-        console.warn(err.stack);
-      }
-    }).end();
-    return result;
+    console.log('try');
+    /* http.request({
+      socketPath,
+    }, (res) => {
+      res.pipe(process.stdout);
+    }).end(); */
+    return 'http://127.0.0.1:8000/';
+    // return socketPath;
   }
 
   onRepl(r) {
@@ -143,7 +157,7 @@ class DevTools {
 
 module.exports = {
   async requestDevTools(iframe) {
-    console.log('network interfaces', os.platform(), JSON.stringify(os.networkInterfaces(), null, 2));
+    // console.log('network interfaces', os.platform(), JSON.stringify(os.networkInterfaces(), null, 2));
     
     const replServer = await _getReplServer();
     return new DevTools(iframe, replServer);
