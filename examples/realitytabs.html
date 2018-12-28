@@ -1482,6 +1482,20 @@ function animate(time, frame) {
                             window.browser.devTools.requestDevTools(iframe.contentWindow)
                               .then(devTools => {
                                 const url = devTools.getUrl();
+
+                                /* console.log('got fetch 0', url);
+                                fetch(url)
+                                  .then(res => {
+                                    console.log('got fetch 1', res.ok);
+                                    return res.text();
+                                  })
+                                  .then(t => {
+                                    console.log('got fetch 2', JSON.stringify(t));
+                                  })
+                                  .catch(err => {
+                                    console.warn(err.stack)
+                                  }); */
+
                                 _openUrl(url, rig.position, rig.quaternion, undefined, 2);
                               })
                               .catch(err => {
