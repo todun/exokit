@@ -182,32 +182,28 @@
         terrainMeshes.splice(terrainMeshes.indexOf(terrainMesh), 1);
       };
       const _onMesh = updates => {
-        try {
-          // console.log('got updates', updates.length);
+        // console.log('got updates', updates.length);
 
-          for (let i = 0; i < updates.length; i++) {
-            const update = updates[i];
-            const {id, type} = update;
+        for (let i = 0; i < updates.length; i++) {
+          const update = updates[i];
+          const {id, type} = update;
 
-            // console.log('got update', {id, type});
+          // console.log('got update', {id, type});
 
-            if (type === 'new' || type === 'update') {
-              const terrainMesh = _getTerrainMesh(id);
-              terrainMesh.material = terrainMaterial;
-              _loadTerrainMesh(terrainMesh, update);
-            } else if (type === 'unchanged') {
-              // const terrainMesh = terrainMeshes.find(terrainMesh => terrainMesh.meshId === id);
-              // terrainMesh.material = terrainHighlightMaterial;
-            } else {
-              const terrainMeshIndex = terrainMeshes.findIndex(terrainMesh => terrainMesh.meshId === id);
-              if (terrainMeshIndex !== -1) {
-                const terrainMesh = terrainMeshes[terrainMeshIndex];
-                _removeTerrainMesh(terrainMesh);
-              }
+          if (type === 'new' || type === 'update') {
+            const terrainMesh = _getTerrainMesh(id);
+            terrainMesh.material = terrainMaterial;
+            _loadTerrainMesh(terrainMesh, update);
+          } else if (type === 'unchanged') {
+            // const terrainMesh = terrainMeshes.find(terrainMesh => terrainMesh.meshId === id);
+            // terrainMesh.material = terrainHighlightMaterial;
+          } else {
+            const terrainMeshIndex = terrainMeshes.findIndex(terrainMesh => terrainMesh.meshId === id);
+            if (terrainMeshIndex !== -1) {
+              const terrainMesh = terrainMeshes[terrainMeshIndex];
+              _removeTerrainMesh(terrainMesh);
             }
           }
-        } catch(err) {
-          console.warn(err.stack);
         }
       };
 

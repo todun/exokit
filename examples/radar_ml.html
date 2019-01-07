@@ -10,11 +10,22 @@
   <script src="three.js"></script>
   <script src="sprite3d.js"></script>
   <script>
+(async () => {
     let container, scene, camera, radarScene, radarCamera, renderer, display, controllerMeshes;
-    let swordMesh = null;
+    const terrainCache = {};
 
+    const localVector = new THREE.Vector3();
+    const localVector2 = new THREE.Vector3();
+    const localVector3 = new THREE.Vector3();
+    const localQuaternion = new THREE.Quaternion();
+    const localMatrix = new THREE.Matrix4();
+    const localFloat32Array = new Float32Array(16);
+
+    const numCubes = 1;
+    const cubeSize = 0.2;
+    const cubeRange = 1;
+    const cubeGeometry = new THREE.BoxBufferGeometry(1, 1, 1);
     const FLOOR_SIZE = 20;
-    let scaleFactor = 1;
 
     const controllerGeometry = new THREE.BoxBufferGeometry(0.1, 0.1, 0.01)
       .applyMatrix(new THREE.Matrix4().makeTranslation(0, 0.1/2, 0));
@@ -76,7 +87,7 @@
       };
     });
 
-    function init() {
+    async function init() {
       container = document.createElement('div');
       document.body.appendChild(container);
 
@@ -95,16 +106,20 @@
         scene.add(directionalLight);
       }
 
-      const woodMesh = new THREE.Object3D();
-      _requestSpriteMesh('wood.png')
-        .then(newWoodMesh => {
-          newWoodMesh.frustumCulled = false;
-          woodMesh.add(newWoodMesh);
-        })
-        .catch(err => {
-          console.warn(err.stack);
-        });
-      scene.add(woodMesh);
+      const woodMesh = await _requestSpriteMesh('wood.png')
+      const _placeItem = position => {
+        // console.log('place item', position.toArray().join(','));
+
+        const woodMesh1 = woodMesh.clone();
+        woodMesh1.position.copy(position);
+        woodMesh1.frustumCulled = false;
+        scene.add(woodMesh1);
+
+        const woodMesh2 = woodMesh.clone();
+        woodMesh2.position.copy(position);
+        woodMesh2.frustumCulled = false;
+        radarScene.add(woodMesh2);
+      };
 
       radarScene = new THREE.Scene();
       radarScene.matrixAutoUpdate = false;
@@ -121,17 +136,6 @@
         directionalLight.position.set(1, 1, 1);
         radarScene.add(directionalLight);
       }
-
-      const woodMesh2 = new THREE.Object3D();
-      _requestSpriteMesh('wood.png')
-        .then(newWoodMesh => {
-          newWoodMesh.frustumCulled = false;
-          woodMesh2.add(newWoodMesh);
-        })
-        .catch(err => {
-          console.warn(err.stack);
-        });
-      radarScene.add(woodMesh2);
 
       const floorMesh = (() => {
         const geometry = new THREE.PlaneBufferGeometry(FLOOR_SIZE, FLOOR_SIZE)
@@ -197,6 +201,141 @@
 
       container.appendChild(renderer.domElement);
 
+      const _updateTerrainMesh = ({positionArray}) => {
+        localVector.fromArray(positionArray);
+        localVector.x = Math.floor(localVector.x);
+        localVector.y = Math.floor(localVector.y);
+        localVector.z = Math.floor(localVector.z);
+
+        // console.log('update terrain mesh', localVector.toArray().join(','));
+
+        const key = `${localVector.x}:{localVector.z}`
+        if (!terrainCache[key]) {
+          const numMeshes = Math.floor(Math.pow(Math.random(), 2) * 4);
+          // console.log('add meshes', numMeshes);
+          for (let i = 0; i < numMeshes; i++) {
+            _placeItem(
+              localVector2
+                .copy(localVector)
+                .add(localVector3.set(Math.random(), 0, Math.random()))
+            );
+          }
+
+          terrainCache[key] = true;
+        }
+      };
+      const _removeTerrainMesh = terrainMesh => {
+        scene.remove(terrainMesh);
+        terrainMesh.geometry.dispose();
+      };
+      const _onMesh = updates => {
+        // console.log('got updates', updates.length);
+
+        for (let i = 0; i < updates.length; i++) {
+          const update = updates[i];
+          const {id, type} = update;
+
+          if (type === 'new' || type === 'update') {
+            _updateTerrainMesh(update);
+          }
+        }
+      };
+      if (window.browser && window.browser.magicleap) {
+        mesher = window.browser.magicleap.RequestMeshing();
+        mesher.onmesh = _onMesh;
+      } else {
+        const gl = renderer.getContext();
+
+        const geometryPositions = cubeGeometry.attributes.position.array;
+        const geometryNormals = cubeGeometry.attributes.normal.array;
+        const geometryIndices = cubeGeometry.index.array;
+
+        /* for (let j = 0; j < geometryPositions.length; j += 3) {
+          localVector
+            .fromArray(geometryPositions, j)
+            .multiplyScalar(cubeSize)
+            .toArray(geometryPositions, j);
+        } */
+        const _doUpdates = () => {
+          const updates = [];
+
+          const vrCamera = renderer.vr.enabled ? renderer.vr.getCamera(camera).cameras[0] : camera;
+          vrCamera.matrixWorld.decompose(localVector, localQuaternion, localVector2);
+
+          for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const positionArray = new Float32Array(new ArrayBuffer(numCubes * geometryPositions.length * Float32Array.BYTES_PER_ELEMENT));
+              const normalArray = new Float32Array(new ArrayBuffer(numCubes * geometryNormals.length * Float32Array.BYTES_PER_ELEMENT));
+              const indexArray = new Uint16Array(new ArrayBuffer(numCubes * geometryIndices.length * Float32Array.BYTES_PER_ELEMENT));
+
+              const offsetVector = localVector2.copy(localVector).add(localVector3.set(dx, 0, dz));
+              for (let i = 0; i < numCubes; i++) {
+                const positionDstOffset = i*geometryPositions.length;
+                for (let j = 0; j < geometryPositions.length; j += 3) {
+                  localVector3
+                    .fromArray(geometryPositions, j)
+                    .multiplyScalar(cubeSize)
+                    .add(offsetVector)
+                    .toArray(positionArray, positionDstOffset + j);
+                }
+
+                const normalDstOffset = i*geometryNormals.length;
+                for (let j = 0; j < geometryNormals.length; j++) {
+                  normalArray[normalDstOffset + j] = geometryNormals[j];
+                }
+
+                const indexDstOffset = i*geometryIndices.length;
+                const indexSrcOffset = i*geometryPositions.length/3;
+                for (let j = 0; j < geometryIndices.length; j++) {
+                  indexArray[indexDstOffset + j] = geometryIndices[j] + indexSrcOffset;
+                }
+              }
+
+              const transformMatrix = localMatrix
+                .fromArray(window.document.xrOffset.matrix)
+                .getInverse(localMatrix)
+                .toArray(localFloat32Array);
+
+              const positionBuffer = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, positionArray, gl.STATIC_DRAW);
+              const positionCount = positionArray.length;
+
+              const normalBuffer = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, normalArray, gl.STATIC_DRAW);
+              const normalCount = normalArray.length;
+
+              const indexBuffer = gl.createBuffer();
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+              gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indexArray, gl.STATIC_DRAW);
+              const count = indexArray.length;
+
+              const update = {
+                id: 0,
+                type: 'update',
+                transformMatrix,
+                positionArray,
+                positionBuffer,
+                positionCount,
+                normalArray,
+                normalBuffer,
+                normalCount,
+                indexArray,
+                indexBuffer,
+                count,
+              };
+              updates.push(update);
+            }
+          }
+
+          renderer.state.reset();
+
+          _onMesh(updates);
+        };
+        setInterval(_doUpdates, 100);
+      }
+
       renderer.setAnimationLoop(animate);
     }
 
@@ -240,7 +379,7 @@
       renderer.render(scene, renderer.vr.enabled ? renderer.vr.getCamera(camera) : camera);
     }
 
-    init();
+    await init();
 
     (async () => {
       console.log('request device');
@@ -272,6 +411,10 @@
         console.log('running!');
       });
     })();
+})()
+  .catch(err => {
+    console.warn(err.stack);
+  });
   </script>
   </body>
 </html>
