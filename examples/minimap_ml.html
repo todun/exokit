@@ -17,7 +17,7 @@
     const controllerMaterial = new THREE.MeshPhongMaterial({
       color: 0xFF0000,
     });
-    const _makeControllerMesh = () => {
+    const _makeControllerMesh = i => {
       const mesh = new THREE.Mesh(controllerGeometry, controllerMaterial);
       mesh.position.set(i === 0 ? -0.1 : 0.1, 0, -0.1);
       mesh.quaternion.setFromUnitVectors(
@@ -56,7 +56,7 @@
 
       controllerMeshes = Array(2);
       for (let i = 0; i < controllerMeshes.length; i++) {
-        const controllerMesh = _makeControllerMesh();
+        const controllerMesh = _makeControllerMesh(i);
 
         scene.add(controllerMesh);
         controllerMeshes[i] = controllerMesh;
