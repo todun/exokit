@@ -849,6 +849,7 @@ if (nativeBindings.nativeMl) {
 }
 
 const fakePresentState = {
+  fakeVrDisplay: null,
   layers: [],
 };
 GlobalContext.fakePresentState = fakePresentState;
@@ -1162,10 +1163,8 @@ const _startRenderLoop = () => {
       timestamps.last = now;
     }
 
-    const window = _getTopWindow();
-    const {fakeVrDisplay} = window[symbols.mrDisplaysSymbol];
-    if (fakeVrDisplay.isPresenting) { // XXX can move this to fakePresentState
-      fakeVrDisplay.waitGetPoses();
+    if (fakePresentState.fakeVrDisplay) {
+      fakePresentState.fakeVrDisplay.waitGetPoses();
     }
     if (vrPresentState.isPresenting) {
       // wait for frame
