@@ -1140,7 +1140,7 @@ const _startRenderLoop = () => {
     total: 0,
   };
   const TIMESTAMP_FRAMES = 100;
-  let lastFrameTime = Date.now();
+  // let lastFrameTime = Date.now();
 
   const _renderLoop = async () => {
     if (args.performance) {
@@ -1465,7 +1465,7 @@ const _startRenderLoop = () => {
         timestamps.last = now;
       }
     } else {
-      await new Promise((accept, reject) => {
+      /* await new Promise((accept, reject) => {
         const now = Date.now();
         const timeDiff = now - lastFrameTime;
         const waitTime = Math.max(8 - timeDiff, 0);
@@ -1473,7 +1473,7 @@ const _startRenderLoop = () => {
       });
       if (!immediate) {
         return;
-      }
+      } */
 
       if (args.performance) {
         const now = Date.now();
@@ -1542,7 +1542,7 @@ const _startRenderLoop = () => {
 
     _blit();
 
-    lastFrameTime = Date.now()
+    // lastFrameTime = Date.now()
 
     if (args.performance) {
       const now = Date.now();
